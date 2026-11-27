@@ -41,7 +41,7 @@ export const hueFor = i => (i * 0.618034 + 0.02) % 1;
  */
 export function restoreState(savedNames, savedCounts, maxBalls = 500) {
   const fresh = () => ({ names: DEFAULT_PEOPLE.slice(), counts: DEFAULT_PEOPLE.map(() => DEFAULT_BALLS) });
-  if (!Array.isArray(savedNames)) return fresh();
+  if (!Array.isArray(savedNames) || !savedNames.every(n => typeof n === 'string')) return fresh();   // 배열이 아니거나 문자열이 아닌 요소가 있으면 깨진 저장값으로 보고 기본값 복구
   const names = dedupeNames(parseNames(savedNames));
   const okCounts = Array.isArray(savedCounts) && savedCounts.length === names.length;
   const counts = okCounts ? savedCounts.map(n => Math.min(maxBalls, Math.max(0, Math.round(+n) || 0))) : names.map(() => DEFAULT_BALLS);

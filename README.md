@@ -26,3 +26,7 @@
 
 - Rapier (Apache-2.0): `vendor/rapier2d.mjs`, 라이선스 `vendor/rapier2d.LICENSE`
 - three.js (MIT): `vendor/three.*.js`, 라이선스 `vendor/three.LICENSE`
+
+## 배포 시 주의 (캐시)
+
+GitHub Pages 는 파일을 10분간 캐시하므로 `roster.js`/`sim.js` 를 고친 배포 전에는 `scripts/bump-version.sh` 를 실행해 `index.html` 의 `?v=` 버전을 올린 뒤 같이 커밋하세요. 회귀 테스트는 저장소 루트에서 `python3 -m http.server 8765` 를 띄우고 `node tests/regression.cjs` (playwright 필요) 로 실행합니다.
