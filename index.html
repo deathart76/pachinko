@@ -93,8 +93,10 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 /* 참가자 입력 */
 .names-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .names-head b{color:var(--gold);font-size:14px}
-.row .nm{flex:1;min-width:0;height:30px;padding:0 8px;color:#fff;font:700 14px var(--body);background:rgba(0,0,0,.25);border:1px solid transparent;border-radius:8px;user-select:text;-webkit-user-select:text}
-.row .nm:focus{outline:2px solid var(--gold);outline-offset:1px;background:rgba(0,0,0,.4)}
+.row .nm{flex:1;min-width:0;height:32px;padding:0 8px;color:#fff;font:700 14px var(--body);background:rgba(0,0,0,.35) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a99cc4' stroke-width='2.5'%3E%3Cpath d='M4 20l4-1 11-11-3-3L5 16z'/%3E%3C/svg%3E") no-repeat right 8px center;border:1px dashed rgba(255,200,58,.4);border-radius:8px;padding-right:26px;cursor:text;user-select:text;-webkit-user-select:text}
+.row .nm:hover{border-color:var(--gold)}
+.row .nm:focus{outline:2px solid var(--gold);outline-offset:1px;border-style:solid;background-image:none;background-color:rgba(0,0,0,.5)}
+.empty{grid-column:1/-1;padding:18px 8px;text-align:center;color:var(--mute);font-size:13px}
 .row .del{width:26px;height:30px;flex:none;border:0;background:none;color:var(--mute);font:700 18px/1 var(--body);cursor:pointer}
 .row .del:hover{color:var(--red)}
 .pager{display:flex;align-items:center;justify-content:center;gap:12px;color:var(--mute);font-size:13px;font-weight:700}
@@ -179,7 +181,7 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 
 <div id="setup"><div class="card">
   <img src="assets/img/logo.webp" alt="LUCKY PACHINKO">
-  <p>사람마다 공 개수를 정하고 굴리세요. OUT 칸에 빠진 공은 탈락,<br><b>마지막까지 공이 남은 한 명이 당첨</b>입니다. 한 판은 35초 이상, 공이 많으면 더 걸립니다.</p>
+  <p>사람마다 공 개수를 정하고 굴리세요. 이름 칸을 눌러 이름을 고칠 수 있습니다(Enter 확정, Esc 취소). OUT 칸에 빠진 공은 탈락,<br><b>마지막까지 공이 남은 한 명이 당첨</b>입니다. 한 판은 35초 이상, 공이 많으면 더 걸립니다.</p>
   <div class="names-head"><b>참가자 <span id="pCount">0</span>명</b>
     <div class="tools"><button class="icon-btn" id="addOne" type="button">+ 참가자 추가</button><button class="icon-btn" id="namesReset" type="button">기본 목록으로</button></div></div>
   <div class="rows" id="rows"></div>
@@ -198,7 +200,7 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 import { RoomEnvironment } from './vendor/RoomEnvironment.js';
-import { DEFAULT_PEOPLE, DEFAULT_BALLS, MAX_NAME_LEN, PAGE_SIZE, MIN_PLAYERS, cleanName, dedupeNames, parseNames, paginate, hueFor } from './roster.js';
+import { DEFAULT_PEOPLE, DEFAULT_BALLS, restoreState, MAX_NAME_LEN, PAGE_SIZE, MIN_PLAYERS, cleanName, dedupeNames, parseNames, paginate, hueFor } from './roster.js';
 import { initPhysics, Game, DT, ACTIVE, LIFT, OUT, suddenTime, BOARD, PINS, BUMPERS, SPINNERS, WARPS, WARP_R, KICKERS, FLIPPERS, DIVIDERS } from './sim.js';
 
 let PEOPLE = DEFAULT_PEOPLE.slice();   // 참가자 이름 (설정 화면에서 입력, 기본값은 이전 고정 목록)
@@ -427,12 +429,9 @@ function updateConfetti(dt, t, emit) {
 
 /* ================= setup UI ================= */
 // 전체 참가자는 배열(PEOPLE/counts)로 보관하고, 화면에는 현재 페이지분만 DOM 으로 그린다.
-// 저장된 이름이 없거나 깨져 있으면 기본 목록을 쓴다. 공 개수는 이름 목록 길이와 맞을 때만 복원한다.
-const savedNames = store.get('names', null);
-if (Array.isArray(savedNames)) { const nm = dedupeNames(parseNames(savedNames)); if (nm.length) { PEOPLE = nm; syncColors(); } }
-let counts = store.get('counts', null);
-if (!Array.isArray(counts) || counts.length !== PEOPLE.length) counts = PEOPLE.map(() => DEFAULT_BALLS);
-counts = counts.map(n => clamp(Math.round(+n) || 0, 0, MAX_BALLS));
+// 저장 데이터가 아예 없을 때만 기본값을 쓰며, 빈 목록도 그대로 복원한다. 구 기본 13명 저장값은 새 기본 6명으로 대체한다 (roster.js 의 restoreState).
+let counts;
+{ const st = restoreState(store.get('names', null), store.get('counts', null), MAX_BALLS); PEOPLE = st.names; counts = st.counts; syncColors(); }
 let page = 0;
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };   // 사용자 입력은 textContent/속성으로만 넣는다
 const save = () => { store.set('counts', counts); store.set('names', PEOPLE); };   // 용량 초과 등은 store 안에서 무시한다
@@ -441,7 +440,7 @@ function renderStats() {
   total = counts.reduce((a, b) => a + b, 0); const players = counts.filter(n => n > 0).length;
   $('total').textContent = total.toLocaleString(); $('players').textContent = players; $('eta').textContent = Math.round(suddenTime(total, MIN_TIME) + 6);
   $('pCount').textContent = PEOPLE.length.toLocaleString();
-  if (ready) { $('btnGo').disabled = players < MIN_PLAYERS; $('btnGo').textContent = players < MIN_PLAYERS ? `${MIN_PLAYERS}명 이상 필요` : 'START'; }
+  if (ready) { $('btnGo').disabled = players < MIN_PLAYERS; $('btnGo').textContent = players < MIN_PLAYERS ? `참가자를 ${MIN_PLAYERS}명 이상 추가하세요` : 'START'; }
 }
 function renderSetup() {
   const pg = paginate(PEOPLE.length, page); page = pg.page; renderStats();
@@ -458,6 +457,7 @@ function renderSetup() {
     minus.dataset.d = -1; plus.dataset.d = 1; name.dataset.role = 'name'; del.dataset.role = 'del';
     rows.push(row);
   }
+  if (!rows.length) rows.push(el('div', { className: 'empty', textContent: `참가자가 없습니다. '+ 참가자 추가'나 일괄 추가로 ${MIN_PLAYERS}명 이상 입력하세요.` }));
   $('rows').replaceChildren(...rows);
   $('pgInfo').textContent = `${pg.page + 1} / ${pg.pages} 페이지 · ${PEOPLE.length ? pg.start + 1 : 0}~${pg.end}번`;
   $('pgPrev').disabled = pg.page <= 0; $('pgNext').disabled = pg.page >= pg.pages - 1;
@@ -472,15 +472,31 @@ function addNames(names) {
 }
 $('rows').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return; const i = +b.dataset.i;
-  if (b.dataset.role === 'del') { PEOPLE.splice(i, 1); counts.splice(i, 1); if (!PEOPLE.length) { $('namesReset').click(); return; } listChanged(); return; }
+  if (b.dataset.role === 'del') { PEOPLE.splice(i, 1); counts.splice(i, 1); listChanged(); return; }   // 전부 지우면 빈 목록 유지 (기본 목록은 버튼으로만 복원)
   counts[i] = clamp(counts[i] + +b.dataset.d, 0, MAX_BALLS); renderSetup();
 });
 $('rows').addEventListener('change', e => {
   const el = e.target.closest('input'); if (!el) return; const i = +el.dataset.i;
-  if (el.dataset.role === 'name') {   // 이름: 정리 후 빈 값이면 되돌린다
-    const nm = cleanName(el.value); if (nm) PEOPLE[i] = nm; listChanged(); return;
-  }
+  if (el.dataset.role === 'name') { commitName(el); return; }
   counts[i] = clamp(Math.round(+el.value) || 0, 0, MAX_BALLS); renderSetup();
+});
+// 이름 확정: Enter/포커스 이탈(change)로 호출. 빈 값이면 이전 이름으로 되돌리고, 중복이면 "이름 (2)" 로 구분한다.
+// 다른 이름이 바뀌지 않으면 다시 그리지 않는다 (이름칸 blur 직후 다른 버튼 클릭이 사라지는 것을 막기 위해).
+function commitName(inp) {
+  const i = +inp.dataset.i, nm = cleanName(inp.value);
+  if (!nm) { inp.value = PEOPLE[i]; return; }
+  PEOPLE[i] = nm;
+  const ded = dedupeNames(PEOPLE), changed = ded.some((n, k) => k !== i && n !== PEOPLE[k]);
+  PEOPLE = ded; inp.value = PEOPLE[i];
+  if (changed) { renderSetup(); return; }
+  const n = PEOPLE[i], row = inp.closest('.row');   // 접근성 라벨만 새 이름으로 갱신
+  row.querySelector('[data-d="-1"]').ariaLabel = n + ' 공 줄이기'; row.querySelector('[data-d="1"]').ariaLabel = n + ' 공 늘리기';
+  row.querySelector('input[type=number]').ariaLabel = n + ' 공 개수'; row.querySelector('.del').ariaLabel = n + ' 삭제'; save();
+}
+$('rows').addEventListener('keydown', e => {
+  const inp = e.target.closest('input.nm'); if (!inp) return;
+  if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }   // blur 시 change 가 발생해 확정된다
+  else if (e.key === 'Escape') { inp.value = PEOPLE[+inp.dataset.i]; inp.blur(); }   // 값을 되돌린 뒤 blur 하므로 change 가 발생하지 않는다
 });
 $('pgPrev').addEventListener('click', () => { page--; renderSetup(); });
 $('pgNext').addEventListener('click', () => { page++; renderSetup(); });
