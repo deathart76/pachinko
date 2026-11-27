@@ -90,6 +90,21 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 .go:active{transform:translateY(5px);box-shadow:0 2px 0 #4e0414}
 .go:disabled{filter:grayscale(.8) brightness(.6);cursor:default}
 
+/* 참가자 입력 */
+.names-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.names-head b{color:var(--gold);font-size:14px}
+.row .nm{flex:1;min-width:0;height:30px;padding:0 8px;color:#fff;font:700 14px var(--body);background:rgba(0,0,0,.25);border:1px solid transparent;border-radius:8px;user-select:text;-webkit-user-select:text}
+.row .nm:focus{outline:2px solid var(--gold);outline-offset:1px;background:rgba(0,0,0,.4)}
+.row .del{width:26px;height:30px;flex:none;border:0;background:none;color:var(--mute);font:700 18px/1 var(--body);cursor:pointer}
+.row .del:hover{color:var(--red)}
+.pager{display:flex;align-items:center;justify-content:center;gap:12px;color:var(--mute);font-size:13px;font-weight:700}
+.pager .icon-btn:disabled{opacity:.35;cursor:default}
+.bulk{background:var(--panel);border:1px solid rgba(255,200,58,.35);border-radius:16px;padding:8px 12px;font-size:13px;color:var(--mute)}
+.bulk summary{cursor:pointer;font-weight:700;color:var(--gold)}
+.bulk textarea{width:100%;margin-top:8px;resize:vertical;min-height:80px;max-height:30vh;padding:8px 10px;color:#fff;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);border-radius:10px;font:600 14px/1.5 var(--body);user-select:text;-webkit-user-select:text}
+.bulk textarea:focus{outline:2px solid var(--gold);outline-offset:1px}
+.bulk-bar{display:flex;align-items:center;gap:10px;margin-top:6px}
+
 /* winner */
 #win{position:fixed;inset:0;z-index:20;pointer-events:none;display:none;overflow:hidden}
 #win.on{display:block}
@@ -165,7 +180,13 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 <div id="setup"><div class="card">
   <img src="assets/img/logo.webp" alt="LUCKY PACHINKO">
   <p>사람마다 공 개수를 정하고 굴리세요. OUT 칸에 빠진 공은 탈락,<br><b>마지막까지 공이 남은 한 명이 당첨</b>입니다. 한 판은 35초 이상, 공이 많으면 더 걸립니다.</p>
+  <div class="names-head"><b>참가자 <span id="pCount">0</span>명</b>
+    <div class="tools"><button class="icon-btn" id="addOne" type="button">+ 참가자 추가</button><button class="icon-btn" id="namesReset" type="button">기본 목록으로</button></div></div>
   <div class="rows" id="rows"></div>
+  <div class="pager"><button class="icon-btn" id="pgPrev" type="button">‹ 이전</button><span id="pgInfo"></span><button class="icon-btn" id="pgNext" type="button">다음 ›</button></div>
+  <details class="bulk"><summary>이름 붙여넣기로 일괄 추가 (한 줄에 한 명)</summary>
+    <textarea id="bulk" rows="5" spellcheck="false" autocomplete="off" placeholder="이름을 한 줄에 하나씩 붙여넣으세요. 빈 줄은 무시되고, 중복 이름은 (2) 처럼 구분됩니다."></textarea>
+    <div class="bulk-bar"><button class="icon-btn" id="bulkAdd" type="button">일괄 추가</button><span id="bulkHint"></span></div></details>
   <div class="bar">
     <span>공 <b id="total">0</b>개 · 참가 <b id="players">0</b>명 · 약 <b id="eta">41</b>초</span>
     <div class="tools"><button class="icon-btn" id="allMinus10">−10</button><button class="icon-btn" id="allMinus">전체 −1</button><button class="icon-btn" id="allPlus">전체 +1</button><button class="icon-btn" id="allPlus10">+10</button></div>
@@ -177,9 +198,10 @@ body.sudden #alarm{opacity:1;animation:alarm .5s steps(1) infinite}
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 import { RoomEnvironment } from './vendor/RoomEnvironment.js';
-import { initPhysics, Game, DT, ACTIVE, LIFT, suddenTime, BOARD, PINS, BUMPERS, SPINNERS, WARPS, WARP_R, KICKERS, FLIPPERS, DIVIDERS } from './sim.js';
+import { DEFAULT_PEOPLE, DEFAULT_BALLS, MAX_NAME_LEN, PAGE_SIZE, MIN_PLAYERS, cleanName, dedupeNames, parseNames, paginate, hueFor } from './roster.js';
+import { initPhysics, Game, DT, ACTIVE, LIFT, OUT, suddenTime, BOARD, PINS, BUMPERS, SPINNERS, WARPS, WARP_R, KICKERS, FLIPPERS, DIVIDERS } from './sim.js';
 
-const PEOPLE = ['benjamin.butn', 'angus.bak', 'bayne.jeong', 'beans.go', 'frisk.gwak', 'hasey.chong2', 'isla.moon', 'jacob.nam', 'jaeky.rs', 'kane.woz', 'kenny.kim2', 'otto.yoon', 'rudy.yoon'];
+let PEOPLE = DEFAULT_PEOPLE.slice();   // 참가자 이름 (설정 화면에서 입력, 기본값은 이전 고정 목록)
 const MAX_BALLS = 500, MIN_TIME = 35, TAG_LIMIT = 160;   // 남은 공이 TAG_LIMIT 개 이하일 때만 이름표를 붙인다
 const R = 0.19, { W, H, SLOTS, SLOT_TOP } = BOARD, HW = W / 2, SLOT_W = W / SLOTS;
 
@@ -192,7 +214,9 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('pachinko.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('pachinko.' + k, JSON.stringify(v)); } catch {} },
 };
-const COLORS = PEOPLE.map((_, i) => new THREE.Color().setHSL((i * 0.618034 + 0.02) % 1, 1, 0.5));
+let COLORS = [];
+const syncColors = () => { while (COLORS.length < PEOPLE.length) COLORS.push(new THREE.Color().setHSL(hueFor(COLORS.length), 1, 0.5)); COLORS.length = PEOPLE.length; };   // 입력 순서대로 배정
+syncColors();
 const css = c => '#' + c.getHexString();
 
 /* ================= audio ================= */
@@ -307,31 +331,42 @@ const slotMeshes = Array.from({ length: SLOTS }, (_, i) => {
 function setSlots(safe) { slotMeshes.forEach((s, i) => { s.safe = !!safe[i]; s.mat.map = s.safe ? texSafe : texOut; s.mat.needsUpdate = true; }); }
 
 /* balls + name tags */
-const MAXB = PEOPLE.length * MAX_BALLS;
-const ballMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0 }), MAXB);
-ballMesh.setColorAt(0, new THREE.Color(1, 1, 1)); ballMesh.frustumCulled = false; ballMesh.count = 0; scene.add(ballMesh);
+const ballGeo = new THREE.SphereGeometry(1, 20, 14), ballMat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0 });
+let ballMesh = null;
+// 인원 상한이 없으므로 공 인스턴스 용량은 판마다 총 공 개수에 맞춘다 (부족할 때만 다시 만든다).
+function ensureBallMesh(n) {
+  if (ballMesh && ballMesh.instanceMatrix.count >= n) return;
+  if (ballMesh) { scene.remove(ballMesh); ballMesh.dispose(); }
+  ballMesh = new THREE.InstancedMesh(ballGeo, ballMat, Math.max(1, n));
+  ballMesh.setColorAt(0, new THREE.Color(1, 1, 1)); ballMesh.frustumCulled = false; ballMesh.count = 0; scene.add(ballMesh);
+}
+ensureBallMesh(1);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _v = new THREE.Vector3(), _c = new THREE.Color();
 // 이름표: 사람별 이름을 한 장의 아틀라스에 그려 두고, 공마다 한 줄씩 골라 한 번에 그린다.
-const TAG_W = 640, TAG_H = 144;
+const TAG_W = 640, TAG_H = 144, TAG_COLS = 4;   // 칸을 가로 TAG_COLS 열로 늘어놓아 텍스처 높이 한계를 피한다
 const tagRow = new THREE.InstancedBufferAttribute(new Float32Array(TAG_LIMIT), 1).setUsage(THREE.DynamicDrawUsage);
 const tagGeo = new THREE.PlaneGeometry(1, TAG_H / TAG_W); tagGeo.setAttribute('aRow', tagRow);
 const tagMat = new THREE.ShaderMaterial({
-  uniforms: { map: { value: null }, rows: { value: PEOPLE.length } }, transparent: true, depthTest: false, depthWrite: false,
-  vertexShader: `attribute float aRow; uniform float rows; varying vec2 vUv;
-    void main(){ vUv = vec2(uv.x, (uv.y + rows - 1.0 - aRow) / rows); gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+  uniforms: { map: { value: null }, rows: { value: 1 }, cols: { value: TAG_COLS } }, transparent: true, depthTest: false, depthWrite: false,
+  vertexShader: `attribute float aRow; uniform float rows; uniform float cols; varying vec2 vUv;
+    void main(){ vUv = vec2((uv.x + mod(aRow, cols)) / cols, (uv.y + rows - 1.0 - floor(aRow / cols)) / rows); gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
   fragmentShader: `uniform sampler2D map; varying vec2 vUv;
     void main(){ gl_FragColor = texture2D(map, vUv);
       #include <colorspace_fragment>
     }`,
 });
 const tagMesh = new THREE.InstancedMesh(tagGeo, tagMat, TAG_LIMIT); tagMesh.frustumCulled = false; tagMesh.renderOrder = 5; tagMesh.count = 0; scene.add(tagMesh);
-function makeTags() {
-  const c = document.createElement('canvas'); c.width = TAG_W; c.height = TAG_H * PEOPLE.length; const g = c.getContext('2d'); g.scale(2, 2);
-  PEOPLE.forEach((name, i) => {
-    const y = i * TAG_H / 2;
-    g.fillStyle = 'rgba(8,3,18,.94)'; g.beginPath(); g.roundRect(3, y + 3, 314, 66, 30); g.fill();
-    g.lineWidth = 5; g.strokeStyle = css(COLORS[i]); g.stroke();
-    g.fillStyle = '#fff'; g.font = '800 36px Pretendard, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(name, 160, y + 38, 290);
+// owners: 이름표를 붙일 소유자 번호 배열. 칸 번호(slot)는 이 배열의 순서다.
+function makeTags(owners) {
+  const rows = Math.max(1, Math.ceil(owners.length / TAG_COLS));
+  tagMat.uniforms.rows.value = rows;
+  if (tagMat.uniforms.map.value) tagMat.uniforms.map.value.dispose();
+  const c = document.createElement('canvas'); c.width = TAG_W * TAG_COLS; c.height = TAG_H * rows; const g = c.getContext('2d'); g.scale(2, 2);
+  owners.forEach((o, k) => {
+    const x = (k % TAG_COLS) * TAG_W / 2, y = Math.floor(k / TAG_COLS) * TAG_H / 2;
+    g.fillStyle = 'rgba(8,3,18,.94)'; g.beginPath(); g.roundRect(x + 3, y + 3, 314, 66, 30); g.fill();
+    g.lineWidth = 5; g.strokeStyle = css(COLORS[o]); g.stroke();
+    g.fillStyle = '#fff'; g.font = '800 36px Pretendard, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(PEOPLE[o], x + 160, y + 38, 290);
   });
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); tagMat.uniforms.map.value = t;
 }
@@ -391,19 +426,70 @@ function updateConfetti(dt, t, emit) {
 }
 
 /* ================= setup UI ================= */
+// 전체 참가자는 배열(PEOPLE/counts)로 보관하고, 화면에는 현재 페이지분만 DOM 으로 그린다.
+// 저장된 이름이 없거나 깨져 있으면 기본 목록을 쓴다. 공 개수는 이름 목록 길이와 맞을 때만 복원한다.
+const savedNames = store.get('names', null);
+if (Array.isArray(savedNames)) { const nm = dedupeNames(parseNames(savedNames)); if (nm.length) { PEOPLE = nm; syncColors(); } }
 let counts = store.get('counts', null);
-if (!Array.isArray(counts) || counts.length !== PEOPLE.length) counts = PEOPLE.map(() => 3);
+if (!Array.isArray(counts) || counts.length !== PEOPLE.length) counts = PEOPLE.map(() => DEFAULT_BALLS);
 counts = counts.map(n => clamp(Math.round(+n) || 0, 0, MAX_BALLS));
-function renderSetup() {
-  const total = counts.reduce((a, b) => a + b, 0), players = counts.filter(n => n > 0).length;
-  $('rows').innerHTML = PEOPLE.map((n, i) => `<div class="row${counts[i] ? '' : ' zero'}" style="--c:${css(COLORS[i])}"><i></i><span>${n}</span><em>${total ? Math.round(counts[i] / total * 100) : 0}%</em>
-    <div class="step"><button data-i="${i}" data-d="-1" aria-label="${n} 공 줄이기">−</button><input type="number" inputmode="numeric" min="0" max="${MAX_BALLS}" value="${counts[i]}" data-i="${i}" aria-label="${n} 공 개수"><button data-i="${i}" data-d="1" aria-label="${n} 공 늘리기">+</button></div></div>`).join('');
+let page = 0;
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };   // 사용자 입력은 textContent/속성으로만 넣는다
+const save = () => { store.set('counts', counts); store.set('names', PEOPLE); };   // 용량 초과 등은 store 안에서 무시한다
+let total = 0;
+function renderStats() {
+  total = counts.reduce((a, b) => a + b, 0); const players = counts.filter(n => n > 0).length;
   $('total').textContent = total.toLocaleString(); $('players').textContent = players; $('eta').textContent = Math.round(suddenTime(total, MIN_TIME) + 6);
-  if (ready) { $('btnGo').disabled = players < 2; $('btnGo').textContent = players < 2 ? '2명 이상 필요' : 'START'; }
-  store.set('counts', counts);
+  $('pCount').textContent = PEOPLE.length.toLocaleString();
+  if (ready) { $('btnGo').disabled = players < MIN_PLAYERS; $('btnGo').textContent = players < MIN_PLAYERS ? `${MIN_PLAYERS}명 이상 필요` : 'START'; }
 }
-$('rows').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const i = +b.dataset.i; counts[i] = clamp(counts[i] + +b.dataset.d, 0, MAX_BALLS); renderSetup(); });
-$('rows').addEventListener('change', e => { const el = e.target.closest('input'); if (!el) return; counts[+el.dataset.i] = clamp(Math.round(+el.value) || 0, 0, MAX_BALLS); renderSetup(); });
+function renderSetup() {
+  const pg = paginate(PEOPLE.length, page); page = pg.page; renderStats();
+  const rows = [];
+  for (let i = pg.start; i < pg.end; i++) {
+    const n = PEOPLE[i];
+    const name = el('input', { type: 'text', className: 'nm', value: n, maxLength: MAX_NAME_LEN, ariaLabel: `${i + 1}번 참가자 이름`, spellcheck: false, autocomplete: 'off' });
+    const minus = el('button', { type: 'button', textContent: '−', ariaLabel: n + ' 공 줄이기' }), plus = el('button', { type: 'button', textContent: '+', ariaLabel: n + ' 공 늘리기' });
+    const cnt = el('input', { type: 'number', inputMode: 'numeric', min: 0, max: MAX_BALLS, value: counts[i], ariaLabel: n + ' 공 개수' });
+    const del = el('button', { type: 'button', className: 'del', textContent: '×', ariaLabel: n + ' 삭제', title: '삭제' });
+    const row = el('div', { className: 'row' + (counts[i] ? '' : ' zero') }, el('i'), name, el('em', { textContent: (total ? Math.round(counts[i] / total * 100) : 0) + '%' }), el('div', { className: 'step' }, minus, cnt, plus), del);
+    row.style.setProperty('--c', css(COLORS[i]));
+    for (const x of [name, minus, plus, cnt, del]) x.dataset.i = i;
+    minus.dataset.d = -1; plus.dataset.d = 1; name.dataset.role = 'name'; del.dataset.role = 'del';
+    rows.push(row);
+  }
+  $('rows').replaceChildren(...rows);
+  $('pgInfo').textContent = `${pg.page + 1} / ${pg.pages} 페이지 · ${PEOPLE.length ? pg.start + 1 : 0}~${pg.end}번`;
+  $('pgPrev').disabled = pg.page <= 0; $('pgNext').disabled = pg.page >= pg.pages - 1;
+  save();
+}
+// 이름 목록이 바뀌면(추가/삭제/중복 정리) 색과 저장값을 맞추고 다시 그린다.
+function listChanged() { PEOPLE = dedupeNames(PEOPLE); syncColors(); renderSetup(); }
+function addNames(names) {
+  if (!names.length) return 0;
+  for (const n of names) { PEOPLE.push(n); counts.push(DEFAULT_BALLS); }   // 반복문으로 push: 수만 건 spread 호출은 스택 한계가 있다
+  PEOPLE = dedupeNames(PEOPLE); syncColors(); page = Math.ceil(PEOPLE.length / PAGE_SIZE) - 1; renderSetup(); return names.length;
+}
+$('rows').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; const i = +b.dataset.i;
+  if (b.dataset.role === 'del') { PEOPLE.splice(i, 1); counts.splice(i, 1); if (!PEOPLE.length) { $('namesReset').click(); return; } listChanged(); return; }
+  counts[i] = clamp(counts[i] + +b.dataset.d, 0, MAX_BALLS); renderSetup();
+});
+$('rows').addEventListener('change', e => {
+  const el = e.target.closest('input'); if (!el) return; const i = +el.dataset.i;
+  if (el.dataset.role === 'name') {   // 이름: 정리 후 빈 값이면 되돌린다
+    const nm = cleanName(el.value); if (nm) PEOPLE[i] = nm; listChanged(); return;
+  }
+  counts[i] = clamp(Math.round(+el.value) || 0, 0, MAX_BALLS); renderSetup();
+});
+$('pgPrev').addEventListener('click', () => { page--; renderSetup(); });
+$('pgNext').addEventListener('click', () => { page++; renderSetup(); });
+$('addOne').addEventListener('click', () => { addNames([`참가자 ${PEOPLE.length + 1}`]); const f = $('rows').lastElementChild; if (f) f.querySelector('.nm').select(); });
+$('bulkAdd').addEventListener('click', () => {
+  const n = addNames(parseNames($('bulk').value));
+  $('bulkHint').textContent = n ? `${n.toLocaleString()}명 추가됨` : '추가할 이름이 없습니다'; if (n) $('bulk').value = '';
+});
+$('namesReset').addEventListener('click', () => { PEOPLE = DEFAULT_PEOPLE.slice(); counts = PEOPLE.map(() => DEFAULT_BALLS); page = 0; syncColors(); renderSetup(); });
 $('allPlus').addEventListener('click', () => { counts = counts.map(n => clamp(n + 1, 0, MAX_BALLS)); renderSetup(); });
 $('allMinus').addEventListener('click', () => { counts = counts.map(n => clamp(n - 1, 0, MAX_BALLS)); renderSetup(); });
 $('allPlus10').addEventListener('click', () => { counts = counts.map(n => clamp(n + 10, 0, MAX_BALLS)); renderSetup(); });
@@ -412,7 +498,11 @@ $('allMinus10').addEventListener('click', () => { counts = counts.map(n => clamp
 /* ================= roster ================= */
 let aliveNow = [];
 function renderRoster() {
-  $('list').innerHTML = PEOPLE.map((n, i) => counts[i] ? `<li id="p${i}" style="--c:${css(COLORS[i])}"><em></em><i></i><span>${n}</span><b>${aliveNow[i]}</b></li>` : '').join('');
+  $('list').replaceChildren(...PEOPLE.map((n, i) => {
+    if (!counts[i]) return null;
+    const li = el('li', { id: 'p' + i }, el('em'), el('i'), el('span', { textContent: n }), el('b', { textContent: aliveNow[i] }));
+    li.style.setProperty('--c', css(COLORS[i])); return li;
+  }).filter(Boolean));
   rerank();
 }
 // 남은 공이 많은 순으로 줄을 세운다. 공 개수가 같으면 같은 등수. 탈락자는 탈락할 때 정해진 등수 자리에 그대로 둔다.
@@ -447,11 +537,12 @@ async function start() {
   $('btnGo').disabled = true;
   try { await audio.init(); await audio.ctx.resume(); } catch (e) { console.warn(e); }
   const sim = new Game(counts, { minTime: MIN_TIME });
+  ensureBallMesh(sim.N);
   window.__sim = { balls: sim.N, radius: sim.R };
   for (const k in goneRank) delete goneRank[k];
   aliveNow = counts.slice(); renderRoster();
   ballMesh.count = 0; tagMesh.count = 0;
-  game = { sim, acc: 0, tick: 0, rank: counts.filter(n => n > 0).length, won: false, saved: false };
+  game = { sim, tagSlot: null, acc: 0, tick: 0, rank: counts.filter(n => n > 0).length, won: false, saved: false };
   document.body.classList.remove('sudden', 'win', 'shake'); $('win').classList.remove('on', 'ready');
   $('setup').classList.add('gone');
   audio.play('start', { vol: .8 });
@@ -511,6 +602,10 @@ function updateGame(dt) {
   g.rosterT = (g.rosterT || 0) + dt; if (g.dirty && g.rosterT > 0.2) { g.dirty = false; g.rosterT = 0; rerank(); }   // 공이 수천 개일 때 매번 다시 세우지 않게 묶는다
   const N = sim.N, r = sim.R, showTags = sim.ballsAlive <= TAG_LIMIT, ts = (sim.ballsAlive > 70 ? 0.95 : sim.ballsAlive > 40 ? 1.12 : 1.35);
   // 판 위나 리프트 튜브에 있어 실제로 보이는 공만 앞에서부터 채워 그린다. 전체 공 수가 늘어도 그리는 양은 그대로다.
+  if (showTags && !g.tagSlot) {   // 남은 공이 TAG_LIMIT 이하가 된 첫 순간, 남은 소유자(최대 TAG_LIMIT명)만 이름표 칸에 올린다
+    const own = new Set(); for (let b = 0; b < N; b++) if (sim.state[b] !== OUT) own.add(sim.owners[b]);
+    const list = [...own]; makeTags(list); g.tagSlot = new Map(list.map((o, k) => [o, k]));
+  }
   let tags = 0, vis = 0;
   for (let b = 0; b < N; b++) {
     const st = sim.state[b];
@@ -518,7 +613,7 @@ function updateGame(dt) {
     const x = sim.x[b], y = sim.y[b];
     _m.makeScale(r, r, r).setPosition(x, y, r + 0.02); ballMesh.setMatrixAt(vis, _m); ballMesh.setColorAt(vis, COLORS[sim.owners[b]]); vis++;
     if (showTags && tags < TAG_LIMIT && st === ACTIVE && y > 0.4) {
-      _m.makeScale(ts, ts, 1).setPosition(x, y + r + 0.17 * ts, 0.7); tagMesh.setMatrixAt(tags, _m); tagRow.array[tags] = sim.owners[b]; tags++;
+      _m.makeScale(ts, ts, 1).setPosition(x, y + r + 0.17 * ts, 0.7); tagMesh.setMatrixAt(tags, _m); tagRow.array[tags] = g.tagSlot.get(sim.owners[b]) ?? 0; tags++;
     }
   }
   ballMesh.count = vis; if (vis) { ballMesh.instanceMatrix.needsUpdate = true; ballMesh.instanceColor.needsUpdate = true; }
@@ -583,7 +678,7 @@ $('btnMute').addEventListener('click', () => audio.setMuted(!audio.muted));
   const [boardTex] = await Promise.all([loadTex('assets/img/board.jpg'), initPhysics(), document.fonts ? document.fonts.load('400 34px Bungee').catch(() => {}) : 0, document.fonts ? document.fonts.load('800 36px Pretendard', 'a').catch(() => {}) : 0]);
   if (boardTex) { boardMat.map = boardTex; boardMat.color.set(0xffffff); boardMat.needsUpdate = true; }
   texSafe = slotTexture('SAFE', 'rgba(57,240,138,.95)', '#04240f'); texOut = slotTexture('OUT', 'rgba(255,43,79,.95)', '#2a0008');
-  makeTags(); ready = true; renderSetup();
+  ready = true; renderSetup();
 })();
 window.__game = { start, again, skip(sec) { if (!game) return; const end = game.sim.t + sec; while (game && game.sim.t < end && !game.won) { game.sim.step(); for (const e of game.sim.events) handle(e); game.sim.events.length = 0; } return game.sim.t; }, get counts() { return counts; }, set counts(c) { counts = c; renderSetup(); } };
 </script>
